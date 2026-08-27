@@ -1,0 +1,93 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# voltride-notifications validates the order-confirmation payload from
+# voltride-orders with a strict Pydantic model and serves records to
+# voltride-frontend. Peers hand-maintain local copies of these shapes — no
+# compiler spans the repo boundary, so wire-format changes are only ever
+# caught by review.
+
+language: "en-US"
+
+tone_instructions: >-
+  Prioritize cross-repo compatibility over style. When this service's HTTP
+  contract changes, name every affected repository and file and the runtime
+  symptom. Never rate a contract change low risk because the diff is small.
+
+reviews:
+  profile: "assertive"
+  high_level_summary: true
+  request_changes_workflow: true
+
+  path_instructions:
+    - path: "**"
+      instructions: >-
+        Treat ANY change to a wire-format element this repo defines — the
+        strict Pydantic OrderConfirmationRequest, a response field name or
+        type, an endpoint path or method, or a status code — as a BREAKING
+        CHANGE for the linked repositories, and enumerate every affected
+        peer exhaustively. OrderConfirmationRequest (orderId, customerEmail,
+        customerName, items[].productId/quantity/lineTotalCents,
+        grandTotalCents, estimatedDeliveryDays) is populated by
+        coderabbit-demo/voltride-orders (clients.go
+        sendOrderConfirmation) — adding a required field, renaming, or
+        retyping any field makes every checkout in the whole system fail
+        with a 422 at the final hop, while this repo's own tests stay green.
+        The 201 response (notificationId, status) is decoded by
+        voltride-orders, and the GET /api/notifications records (including
+        sentAt) by coderabbit-demo/voltride-frontend
+        (src/api/notifications.ts). Severity for an unaccompanied contract
+        change is CRITICAL — the blast radius lives in other repositories,
+        so a small diff means higher risk, not lower.
+    - path: "catalog_client.py"
+      instructions: >-
+        Local copy of voltride-catalog's /summary contract (reads "name").
+        Flag any drift between this file and what
+        coderabbit-demo/voltride-catalog actually serves.
+
+  labeling_instructions:
+    - label: "breaking-change"
+      instructions: >-
+        Apply when the PR changes the OrderConfirmationRequest model, the
+        confirmation response, or the notification records in a way the
+        linked repositories do not already handle.
+    - label: "cross-repo-impact"
+      instructions: >-
+        Apply when a change here alters the runtime behavior of another
+        VoltRide repo, even if every payload still parses.
+
+  pre_merge_checks:
+    custom_checks:
+      - name: "Cross-repo contract compatibility"
+        mode: "error"
+        instructions: >-
+          FAIL this check if the PR modifies the strict Pydantic
+          OrderConfirmationRequest (new required field, rename, retype), the
+          confirmation response shape, the notification record shape, or the
+          endpoint paths/status codes — or drifts catalog_client.py away
+          from what voltride-catalog actually serves. The affected peers
+          (voltride-orders, voltride-frontend) live in linked repositories
+          and CANNOT be fixed in this PR, so such a change may only PASS
+          when the PR description links coordinated pull requests updating
+          every affected repo, or the change is demonstrably additive (e.g.
+          a new OPTIONAL request field with a default).
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+  linked_repositories:
+    - repository: "coderabbit-demo/voltride-orders"
+      instructions: >-
+        Populates this repo's strict OrderConfirmationRequest from clients.go
+        sendOrderConfirmation and decodes the 201 response
+        (notificationId, status). Any request-model change here breaks every
+        checkout there.
+    - repository: "coderabbit-demo/voltride-catalog"
+      instructions: >-
+        Producer this repo consumes: GET /api/products/:id/summary ("name")
+        read in catalog_client.py to render email copy.
+    - repository: "coderabbit-demo/voltride-frontend"
+      instructions: >-
+        Consumer of this repo's GET /api/notifications records
+        (src/api/notifications.ts) for the order-confirmation page inbox.
